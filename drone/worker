@@ -1,0 +1,471 @@
+--[[
+
+This is not, as yet, part of the Turtletopia project, I've added it to the repo from
+an old, abandoned project as elements of it may be adapted and used in this project.
+
+--]]
+--[[=============  worker API ========
+
+high-level turtle control scripts; can be assigned tasks, which are queued and handled 
+one at a time. Saves state to disk and automatically resumes where it left off when
+rebooted. 
+
+dependencies: goroutine, turtlex
+
+code by GopherAtl. Do whatever you want with it, just don't take credit. If you do 
+distribute a modified version, or as a dependency for a program that uses it, please 
+link to my thread on the computercraft forums.
+
+--=========================================--]]
+local knownTasks={}
+
+local curTask=nil
+local taskQueue={}
+local cmdTable={}
+
+--[[==================================]]--
+--[[======== internal methods ========]]--
+--[[==================================--]]--
+
+--internal use only, returns index of the task with the specified name or,
+--if task not found, the index where it should be inserted
+local function findTaskIndex(taskName)
+  for i=1,#knownTasks do
+    if knownTasks[i].name<=taskName then
+      return i
+    end
+  end
+  return #knownTasks+1
+end
+
+--[[==== worker terminal commands ====--]]--
+
+local function cmd_do(line)
+  if line==nil or #line==0 then
+    print("Command \"do\" must be followed by a task!")
+    return
+  end
+  local cmd,paramStr=string.match(line,"(%S+)%s*(.*)")
+  local task=findTask(cmd)
+  if task==nil then
+    print("Sorry, I don't know how to '"..cmd.."' :(")
+  else
+    local params=task.parse(paramStr)
+    if params~=nil then
+      print("Queued")
+      taskQueue[#taskQueue+1]={task=task,params=params}
+      os.queueEvent("worker_newTask",console,task.name,params)
+      --stop just long enough for task to start, if it was the first
+      if #taskQueue==1 then
+        coroutine.yield()
+      end
+    else
+      print("Wrong parameters to do.")
+    end
+  end
+end
+
+
+local function cmd_status(line)
+  if curTask==nil then
+    print("Idle.")
+    
+  else
+    print("Current task: "..curTask.task.toString(curTask.params).."\n\t"..curTask.task.status(curTask.params))
+    if #taskQueue>0 then
+      print("queued tasks:")
+      for i=1,#taskQueue,1 do
+        print(taskQueue[i].task.toString(taskQueue[i].params))
+      end
+    else
+      print("No more tasks queued")
+    end
+  end
+end
+
+
+--[[===================================]]--
+--[[==========  api interface  ========]]--
+--[[===================================--]]--
+
+function findTask(taskName)
+  local index=findTaskIndex(taskName)
+  if index<=#knownTasks and knownTasks[index].name==taskName then
+    return knownTasks[index]
+  else
+    return nil
+  end
+end
+
+function addTaskDef(task)
+  --is it a valid task?
+  if  task==nil or 
+      type(task)~="table" or
+      task.name==nil or
+      task.start==nil or
+      task.resume==nil or
+      task.checkComplete==nil or
+      task.status==nil or
+      task.parse==nil or
+      task.toString==nil then
+    return false,"ERROR: worker:addTask:: Invalid task table!"
+  end
+    
+  local index=findTaskIndex(task.name)
+  if index==#knownTasks+1 or knownTasks[index].name~=task.name then
+    table.insert(knownTasks,index,task)
+    return true
+  end
+  
+  return false
+end
+
+--[[============================================]]--
+--[[========  standard turtle commands  ========]]--
+--[[============================================--]]--
+
+--[[==== moveTo ====--]]--
+
+local function tostring_moveTo(params)
+  return "moveTo "..params.x.." "..params.y.." "..params.z..(turtlex.directionToString(params.dir) or "")
+end
+
+local function parse_moveTo(line)
+  local x,y,z,facing=string.match(line,"^%s*(-?%d+)%s+(-?%d+)%s+(-?%d+)%s*(%a*)%s*$")
+  --validate
+  local result=nil
+  if x~=nil then
+    
+    if facing~="" then
+      --check facing
+      facing=turtlex.todirection(facing)
+      if facing==nil then 
+        return nil, "invalid final facing direction!"
+      end
+    else
+      facing=nil
+    end
+    return {x=tonumber(x),y=tonumber(y),z=tonumber(z), dir=facing}
+  end  
+end
+
+local function start_moveTo(params)
+  print("entering start_moveTo")
+  local curX,curY,curZ=turtlex.getPosition()
+  local steps=math.abs(curX-params.x)+math.abs(curY+params.y)+math.abs(curZ+params.z)
+  params.totalSteps=steps
+  
+  print("starting "..tostring_moveTo(params))
+  turtlex.goto(params.x,params.y,params.z)
+ 
+  if params.dir~=nil then 
+    turtlex.face(params.dir)
+  end
+end
+
+local function check_moveTo(params)
+  local x,y,z=turtlex.getPosition()
+  
+  return x==params.x and y==params.y and z==params.z 
+      and (params.dir==nil or params.dir==turtlex.getDirection())
+end
+    
+
+local function status_moveTo(params)
+  local curX,curY,curZ=turtlex.getPosition()
+  local steps=math.abs(curX-params.x)+math.abs(curY+params.y)+math.abs(curZ+params.z)
+  local percent=math.floor(((params.totalSteps-steps)/params.totalSteps)*100)
+  return percent.."%"  
+end
+
+
+--[[==== drop  ====--]]--
+
+local function tostring_drop(params)
+  return "drop "..params.slot.." "..params.qty..(params.dir and turtlex.directionToString(params.dir).." " or "")
+end
+
+local function parse_drop(line)
+  local dropWhat, qty, dir = string.match(line,"^%s*(%d+)%s+(%d+)%s*(%a*)%s*$")
+  if slot~=nil then
+    if dir~="" then
+      dir=turtlex.todirection(dir)    
+      if dir==nil then
+        return nil, "invalid direction specified"
+      end
+    else
+      dir=nil
+    end
+    --validate slot, if it's a number
+    if tonumber(dropWhat) then
+      slot=tonumber(dropWhat)
+      if dropWhat<1 or dropWhat>16 then
+        return nil, "if dropWhat is a slot# it must be between 1 and 16"
+      end    
+    end
+    if qty<1 or qty>64 then
+      return nil, "quantity must be between 1 and 64!"
+    end
+    return {dir=dir, dropWhat=tonumber(dropWhat), qty=tonumber(qty)}        
+  end
+end
+
+local function start_drop(params)
+  params.prevQuantity = turtlex.getItemCount(params.dropWhat)
+  if params.dir and params.dir~=turtlex.getDirection() then
+    turtlex.face(params.dir)
+  end
+  
+  if type(params.dropWhat)=="string" then
+    --type name, loop over slots
+    local qty=params.qty
+    for slot in turtlex.typeSlots() do
+      local succ,amt=turtlex.drop(qty,slot)
+      qty=qty-amt
+      --stop if we're done
+      if qty==0 then break end
+    end
+  end
+end
+
+local function resume_drop(params)
+  if not params.dir or params.dir==turtlex.getDirection() then
+    --we turned, check qtys
+    if params.prevQuantity then
+      local curQty=turtlex.getItemCount(params.dropWhat)
+      if curQty~=params.prevQuantity then
+        --amount changed...
+        if curQty==0 or params.prevQuantity-curQty==params.qty then
+          --we dropped the expected amount, or all we had. Just return.
+          return
+        end
+        --update intended quantity
+        params.qty=params.qty - (params.prevQuantity - curQty)
+      end
+    end
+  end
+  return start_drop(params)
+end
+
+
+local function check_drop(params)
+  --am I facing the specified direction?
+  if params.dir and params.dir~=turtlex.getDirection() then
+      --not finished, not really even started
+      return false 
+  end
+  --compare current quantity to intended
+  local qty= turtlex.getItemCount(params.dropWhat)
+  --return if none left to drop or decreased by expect amount
+  return qty==0 or params.prevQuantity-qty==params.qty then
+end
+
+local function status_drop(params)
+  --compare current quantity to intended
+  if params.prevQuantity==nil then
+    return 0
+  end
+  local qty= turtlex.getItemCount(params.dropWhat)
+  return math.floor(((params.prevQuantity-quantity)/params.qty)*100)
+end
+
+
+--[[==== suck  ====--]]--
+
+local function tostring_suck(params)
+  return "suck "..params.slot..(params.type and (" "..params.type) or "")
+end
+
+local function parse_suck(line)
+  local slot,type=string.parse(line,"^%s*(%d+)%s+(%a+%d*)%s*$")
+  if slot~=nil then
+    slot=tonumber(slot)
+    if not slot or slot<1 or slot>16 then
+      return nil, "Invalid slot - must be a number between 1 and 16"
+    end
+    return {slot=slot,type=type)
+  end
+end
+
+local function start_suck(params)
+  
+end
+
+local function resume_suck(params)
+
+end
+
+local function check_suck(params)
+
+end
+
+local function status_suck(params)
+
+end
+
+
+--[[==== dummy ====--]]--
+
+local function tostring_dummy(params)
+  
+end
+
+local function parse_dummy(line)
+
+end
+
+local function start_dummy(params)
+
+end
+
+local function resume_dummy(params)
+
+end
+
+local function check_dummy(params)
+
+end
+
+local function status_dummy(params)
+
+end
+
+
+function waitForCommand()
+  print("entered waitForCommand()")
+  while true do   
+    local line=console.readFooter("worker"..os.getComputerID().."]")
+    local cmd,paramStr=string.match(line,"(%S+)%s*(.*)")
+    if cmdTable[cmd]~=nil then
+      cmdTable[cmd](paramStr)
+    else
+      print("I don't know that command.")
+    end    
+  end
+end
+
+function errorLogger()
+  while true do
+    local _,name,err=os.pullEvent("coroutine_error")
+    print("coroutine "..name.." crashed with error: "..err)
+  end
+end
+
+function loadState()
+  local serialized=surefile.load(".workerState")
+  if serialized then  
+    local state=textutils.unserialize(serialized)
+    curTask=state.curTask
+    --replace names with the actual tasks again
+    curTask.task=findTask(curTask.task)
+    taskQueue=state.taskQueue
+    for i=1,#taskQueue do
+      taskQueue[i].task=findTask(taskQueue[i].task)
+    end
+    return true
+  end  
+end
+
+function saveState()
+  --build up a state table
+  local state={ curTask={}, taskQueue={} }
+  
+  for k,v in pairs(curTask) do
+    if k=="task" then
+      state.curTask[k]=curTask[k].name
+    else
+      state.curTask[k]=curTask[k]
+    end
+  end
+  
+  for i=1,#taskQueue do
+    for k,v in pairs(taskQueue[i]) do
+      if k=="task" then
+        state.taskQueue[i][k]=taskQueue[i][k].name
+      else
+        state.taskQueue[i][k]=taskQueue[i][k]
+      end
+    end
+  end
+  --write it to disk!
+  surefile.save(".workerState",textutils.serialize(state))
+end
+
+
+function run()
+  goroutine.spawn("waitForCommand",waitForCommand)
+  goroutine.spawn("errorLogger",errorLogger)
+  --if we have a curTask already, resume
+  if curTask then
+    print("resuming task "..curTask.task.toString(curTask.params))
+    curTask.task.resume(curTask.params)
+    curTask=nil
+    saveState()
+  end
+  
+  while true do    
+    if #taskQueue==0 then
+      curTask=nil
+      print("Idling...")
+      goroutine.waitForEvent("worker_newTask")
+      print("Got a task!")
+    end
+    curTask=taskQueue[1]
+    table.remove(taskQueue,1)
+    print("saving...")
+    saveState()
+    print("saved!")
+    print("starting task "..curTask.task.toString(curTask.params))
+    curTask.task.start(curTask.params)
+    curTask=nil
+    saveState()
+  end
+  
+end
+
+function startup()
+  console.enable()
+  loadState()  
+  goroutine.run(run)
+  console.disable()
+end
+
+
+if not addTaskDef( {
+    name="moveTo",
+    start=start_moveTo, 
+    resume=start_moveTo,
+    checkComplete=check_moveTo,
+    status=status_moveTo,
+    parse=parse_moveTo,
+    toString=tostring_moveTo,
+  } ) then
+  error("Couldn't add task moveTo!")
+end
+
+if not addTaskDef( {
+    name="drop",
+    start=start_drop, 
+    resume=resume_drop,
+    checkComplete=check_drop,
+    status=status_drop,
+    parse=parse_drop,
+    toString=tostring_drop,
+  } ) then
+  error("Couldn't add task drop!")
+end
+
+if not addTaskDef( {
+    name="suck",
+    start=start_suck, 
+    resume=resume_suck,
+    checkComplete=check_suck,
+    status=status_suck,
+    parse=parse_suck,
+    toString=tostring_suck,
+  } ) then
+  error("Couldn't add task suck!")
+end
+  
+cmdTable["do"]=cmd_do
+cmdTable["status"]=cmd_status
