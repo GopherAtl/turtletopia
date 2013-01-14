@@ -1,0 +1,2 @@
+Jobs are series of tasks to be performed in order by a drone. Jobs are constructed by managers and assigned to available drones as needed. Each task takes one or more parameters; a job is simply an array of tasks, where each task is defined as a table with the task name and arguments, keyed by names.
+
