@@ -1,0 +1,108 @@
+--basic messaging api for drones and managers
+ nextMsgID=1
+ pendingAck = {}
+ messageQueue = {}
+ handledMsgs = {}
+
+local myID=os.getComputerID()
+
+
+function loadState()
+  if fs.exists(".messaging") then
+    local file=fs.open(".messaging","r")
+    local state=file.readAll()
+    file.close()
+
+    state=textutils.unserialize(state)
+    
+    nextMsgID=state.nextMsgID
+    pendingAck=state.pendingAck
+    messageQueue=state.messageQueue
+  end
+end
+
+function saveState()
+  local file=fs.open(".messaging","w")
+  local state={
+    nextMsgID=nextMsgID,
+    pendingAck=pendingAck,
+    messageQueue=messageQueue,
+  }
+  
+  file.write(textutils.serialize(state))
+  file.close()
+end
+
+
+local function sendMessageDesc(msgDesc)
+  rednet.send(sendTo, msgDesc.msgID.."|"..msgDesc.type.."|"..textutils.serialize(msgDesc.args))
+end
+
+
+function sendMessage(sendTo, messageType, ...)
+  local args={...}
+  local msgDesc={sourceID=myID, msgID=nextMsgID, type=messageType, targetID=sendTo, args=args }
+  if msgType~="ack" then
+    pendingAck[nextMsgID]=msgDesc
+  end
+  nextMsgID=nextMsgID+1
+  
+  sendMessageDesc(msgDesc)
+  saveState()
+end
+
+
+function handleMessage(sourceID,rawMsg)
+  local msgID, type, args=string.match(rawMsg,"^(%d+)|([^|]+)|(.*)$")
+   
+  msgID=tonumber(msgID)
+  
+  local msg={
+    sourceID=sourceID,
+    msgID=msgID,
+    type=type,
+    args=textutils.unserialize(args),
+  }
+
+  if type=="ack" then
+    print("ack to msg "..msg.args[2])
+    pendingAck[msg.args[2]]=nil
+    saveState()
+  else
+    if not handledMsgs[sourceID..":"..msgID] then
+      messageQueue[#messageQueue+1]=msg
+      handledMsgs[msgID]=true
+      saveState()
+    end
+    
+    --send an ack regardless
+    sendMessage(id,"ack",type,msgID)
+  end
+  
+end
+
+
+function messagesWaiting()
+  if #messageQueue>0 then
+    return #messageQueue
+  end
+  return nil
+end
+
+function getNextMessage()
+  if #messageQueue>0 then
+    return table.remove(messageQueue,1)
+  end
+end
+
+--message handler coroutine
+function coMessageHandler()
+  while true do
+    local _, sourceID, msg, dist=os.pullEvent("rednet_message")
+    
+    handleMessage(sourceID,msg)
+
+  end    
+end
+
+loadState()

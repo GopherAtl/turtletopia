@@ -1,0 +1,36 @@
+--[[ turtletopia ]]--
+
+Set of apis that provide a framework for general automation with ComputerCraft 
+computers and turtles, as well as implementations of certain facilities based
+on this framework.
+
+Facility
+A "unit" of automation, generally a single structure, which 
+provides some set of services to players, turtles, other facilities. Each 
+facility is managed by a central computer called a manager, and has one or 
+more turtles to carry out relevant tasks for the facility. Some facilities
+central structure will be no more than a site containing the facility manager
+computer, while providing services over a distributed area around that 
+facility. For such distributed service facilities, the central structure may 
+even be shared with other service managers.
+
+Manager
+The central computer of each facility. Tracks the status of the facility and
+directs the actions of all turtle drones assigned to it. In addition to 
+directing turtles, managers take requests from players and other facilities
+which will affect the priorities and operation of the facility. Managers will
+provide an interface, accessible directly through the manager itself, or 
+remotely via rednet from any computer with the appropriate remote 
+administration software.
+
+Drone
+A drone is a turtle running a core program intended to allow it to be directed
+and monitored by facility managers.
+
+Access Terminal
+Access terminals simply provide an interface to communicate remotely with 
+managers to view the status of facilities and their drones, to manage the
+facility's settings, and to perform other administrative tasks.
+
+
+

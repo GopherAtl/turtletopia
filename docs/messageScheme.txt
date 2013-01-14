@@ -1,0 +1,81 @@
+communication between manager and drones
+
+All messages will include a message number, which is unique when combined with the sender ID, used to associate responses with messages where necessary. '
+Also used to ignore repeated delivery of messages, though will re-ack. ID is not listed in the params below, but it is an implied first argument to all.
+
+
+These are the generic messages common to all managers/drones; additional message types can be defined by facilities.
+
+
+messages, 
+  mgr->drone:
+    queueJob - append a job to the queue.
+      params:
+      	number	messageID
+      	string 	jobName
+      	list 	job parameters 
+      	table	job definition
+      	
+
+      response: ack
+      
+    status - get the status of the turtle. Current job, current task in job, size of queue, current fuel level?
+      params: 
+      	number	messageID
+      
+      response: droneStatus
+      
+    priorityJob - queue this job at the TOP of the queue instead of the bottom, so it will be the next job performed
+      params: 
+      	string	jobName
+        table	job definition
+      	
+      response: ack 
+      
+    
+    reqKnownJobs - asks a drone for a list of the jobs it knows how to perform
+      params: none
+      
+      response: knownJobs
+      
+    ack - basic acknowledgement message, params are the type and id of the message being ack'd.
+    	params: 
+    	  string  msgType   the base type of the message being ack'd
+    	  number  msgID    the numeric id of the message being ack'd
+    	
+    	response: none
+    	
+    	
+  drone->mgr
+    
+    droneStatus
+    
+    reqJobDefinition - requests the definition of a job from a manager. Sent when a drone is assigned a job it doesn't know how to do.
+    	params: 
+    	  string  jobName 
+    	
+    	response: jobDefinition
+    
+    knownJobs - sends a list of the jobs known to a drone, in response to a reqKnownJobs message
+      params: 
+        array  job names   a list of the names of jobs it can perform
+    
+    jobCompleted - sent when a job is completed.
+      params:
+        number  jobsLeft   number of jobs remaining in it's queue
+        string  nextJob    name of the next job in the queue
+        number  jobID      numeric id of the job in the queue
+        
+      response: ack
+      
+    ack - 
+    	params:
+    	  string  msg
+    	  number  ackdMsgID 
+	
+	response: none
+	
+	
+Job definitions:
+
+A job is defined as a series of tasks, each of which takes some amount of arguments.
