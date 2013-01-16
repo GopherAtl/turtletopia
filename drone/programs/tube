@@ -1,0 +1,105 @@
+local dirFuncs={
+  front={
+    go=turtle.forward,
+    detect=turtle.detect,
+    rs=function() return rs.getInput("front") end,
+  },
+  top= {
+    go=turtle.up,
+    detect=turtle.detectUp,
+    rs=function() return rs.getInput("top") end,
+  },
+  bottom= {
+    go=turtle.down,
+    detect=turtle.detectDown,
+    rs=function() return rs.getInput("bottom") end,
+  },
+}
+
+
+local dir=nil
+
+local function testConductivity(side)
+  rs.setOutput(side,true)
+  sleep(0)
+  local res=rs.getInput(side)
+  rs.setOutput(side,false)
+  sleep(0)
+  return res
+end
+
+
+local function determineDir()
+  dir=nil
+  local du=turtle.detectUp() and perhipheral.getType("top")~="turtle"
+  local dd=turtle.detectDown() and perhipheral.getType("bottom")~="turtle"
+  if not (du or dd) then
+    print("v shaft")
+    --nothing above or below, we are in a vertical shaft or at an exit
+    local detectCount, conductCount=0,0
+    for i=1,4 do
+      if turtle.detect() and peripheral.getType("front")~="turtle" then
+        detectCount=detectCount+1 
+        if testConductivity("front") then
+          conductCount=conductCount+1
+        end
+      end
+      turtle.turnLeft()
+    end
+    if detectCount==1 then
+      --at an exit
+      return
+    elseif conductCount==1 then
+      dir="top"
+    else
+      dir="bottom"
+    end    
+    --ok... at least 2 sides will detect if we're at 
+  else
+    print("not vshaft")
+    --something above or below, check conductivity
+    if turtle.detect() and perhipheral.getType("front")~="turtle"then
+      print("blocked")
+      --something blocking us, so up or down
+      if testConductivity("top") then
+        print("going down")
+        dir="bottom"
+      elseif testConductivity("bottom") then
+        dir="top"
+      else
+        --not up or down, have to check 4 sides
+        for i=1,4 do
+          if testConductivity("back") then
+            dir="front"            
+            break
+          end
+          turtle.turnLeft()
+        end          
+        if dir==nil then
+          error("Lost in the intertubez!!")
+        end
+      end
+    else
+      --nothing blocking us - 
+      dir="front"
+    end
+  end
+end
+
+local maxAttempts=5
+
+while true do
+  determineDir()
+  if not dir then   
+    --done!
+    return
+  end
+  repeat
+    write(".")
+    while dirFuncs[dir].go() do 
+    end
+  until peripheral.getType(dir)~="turtle" do
+  end
+    
+end
+
